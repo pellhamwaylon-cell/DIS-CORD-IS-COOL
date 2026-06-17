@@ -1,104 +1,1148 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discord Clone</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #2b2d31; }
-        ::-webkit-scrollbar-thumb { background: #1e1f22; border-radius: 4px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Julian Music</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <style>
+    /* Ensure the body takes up the full screen height and hides scrollbars as intended */
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background-color: black;
+    }
+  </style>
 </head>
-<body class="bg-[#313338] text-[#dbdee1] font-sans antialiased h-screen overflow-hidden select-none">
+<body>
+  <div id="root"></div>
 
-    <div id="auth-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-        <div class="bg-[#313338] p-8 rounded-md shadow-lg w-96 text-center border border-[#2b2d31]">
-            <h2 class="text-white text-2xl font-bold mb-2">Welcome Back!</h2>
-            <p class="text-[#b5bac1] text-sm mb-6">Enter a username and upload a PFP.</p>
-            <input type="text" id="username-input" placeholder="Username" class="w-full p-3 rounded bg-[#1e1f22] text-white focus:outline-none mb-4 border border-[#1e1f22] focus:border-[#5865f2]">
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18.2.0';
+    import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
+    import { 
+      Play, Pause, SkipBack, SkipForward, Volume2, Search, 
+      Home, Radio, Library, PlusCircle, Settings, UploadCloud, 
+      FolderDown, Music, HardDrive, Cloud, Shuffle, Repeat, 
+      MoreHorizontal, ChevronLeft, ChevronRight, Mic,
+      ImagePlus, Shield, ListMusic, Trash2, Download, Edit2, List,
+      Maximize2, Minimize2, Activity, X, ChevronDown
+    } from 'https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0';
+
+    // --- DATABASE: INDEXEDDB SETUP ---
+    const DB_NAME = 'JulianMusicDB';
+    const DB_VERSION = 2; // Bumped version for Playlists
+    const STORE_NAME = 'tracks';
+    const PLAYLIST_STORE = 'playlists';
+
+    const initDB = () => {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = (event) => {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          }
+          if (!db.objectStoreNames.contains(PLAYLIST_STORE)) {
+            db.createObjectStore(PLAYLIST_STORE, { keyPath: 'id' });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    };
+
+    // --- DB HELPERS: TRACKS ---
+    const saveTrackToDB = async (track) => {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_NAME], 'readwrite');
+        tx.objectStore(STORE_NAME).put(track).onsuccess = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    };
+
+    const getTracksFromDB = async () => {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_NAME], 'readonly');
+        tx.objectStore(STORE_NAME).getAll().onsuccess = (e) => resolve(e.target.result);
+        tx.onerror = () => reject(tx.error);
+      });
+    };
+
+    const deleteTrackFromDB = async (id) => {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_NAME], 'readwrite');
+        tx.objectStore(STORE_NAME).delete(id).onsuccess = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    };
+
+    const updateTrackInDB = async (track) => {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_NAME], 'readwrite');
+        tx.objectStore(STORE_NAME).put(track).onsuccess = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    };
+
+    // --- DB HELPERS: PLAYLISTS ---
+    const savePlaylistToDB = async (playlist) => {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([PLAYLIST_STORE], 'readwrite');
+        tx.objectStore(PLAYLIST_STORE).put(playlist).onsuccess = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    };
+
+    const getPlaylistsFromDB = async () => {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([PLAYLIST_STORE], 'readonly');
+        tx.objectStore(PLAYLIST_STORE).getAll().onsuccess = (e) => resolve(e.target.result);
+        tx.onerror = () => reject(tx.error);
+      });
+    };
+
+    const deletePlaylistFromDB = async (id) => {
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([PLAYLIST_STORE], 'readwrite');
+        tx.objectStore(PLAYLIST_STORE).delete(id).onsuccess = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    };
+
+    // --- UTILS ---
+    const formatTime = (time) => {
+      if (isNaN(time)) return "0:00";
+      const minutes = Math.floor(time / 60);
+      const seconds = Math.floor(time % 60);
+      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    };
+
+    const stringToColor = (str) => {
+      if (!str) return 'linear-gradient(135deg, #333, #111)';
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const c1 = `hsl(${hash % 360}, 70%, 60%)`;
+      const c2 = `hsl(${(hash + 40) % 360}, 80%, 40%)`;
+      return `linear-gradient(135deg, ${c1}, ${c2})`;
+    };
+
+    // --- MAIN APP COMPONENT ---
+    function App() {
+      // State
+      const [activeTab, setActiveTab] = useState('library');
+      const [tracks, setTracks] = useState([]);
+      const [playlists, setPlaylists] = useState([]);
+      const [activePlaylistId, setActivePlaylistId] = useState(null);
+      
+      // Playback & Queue State
+      const [currentTrack, setCurrentTrack] = useState(null);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [progress, setProgress] = useState(0);
+      const [duration, setDuration] = useState(0);
+      const [volume, setVolume] = useState(1);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [queue, setQueue] = useState([]); // Dynamic queue based on context
+      const [isShuffle, setIsShuffle] = useState(false);
+      
+      // Admin & Context Menu
+      const [isAdmin, setIsAdmin] = useState(localStorage.getItem('isAdmin') === 'true');
+      const [eqValues, setEqValues] = useState([0, 0, 0, 0, 0]); 
+      const [contextMenu, setContextMenu] = useState(null);
+      const [contextSubMenu, setContextSubMenu] = useState(false);
+      const [driveResults, setDriveResults] = useState([]); 
+
+      // UI States (Modals, Toasts, Visualizer)
+      const [modalConfig, setModalConfig] = useState(null); 
+      const [toastMessage, setToastMessage] = useState(null);
+      const [isNowPlaying, setIsNowPlaying] = useState(false);
+
+      // Upload Queue
+      const [uploadQueue, setUploadQueue] = useState([]);
+      const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+      const [processedCount, setProcessedCount] = useState(0);
+
+      // Settings
+      const [gcpClientId, setGcpClientId] = useState(localStorage.getItem('gcpClientId') || '');
+      const [gcpApiKey, setGcpApiKey] = useState(localStorage.getItem('gcpApiKey') || '');
+      const [isDriveConnected, setIsDriveConnected] = useState(false);
+
+      // Refs
+      const audioRef = useRef(new Audio());
+      const fileInputRef = useRef(null);
+      const folderInputRef = useRef(null);
+      const audioCtxRef = useRef(null);
+      const analyserRef = useRef(null);
+      const canvasRef = useRef(null);
+      const reqAnimRef = useRef(null);
+      const filtersRef = useRef([]);
+      const artInputRef = useRef(null);
+      const playlistArtInputRef = useRef(null);
+      const targetForArtRef = useRef(null);
+      const isOfficialArtUploadRef = useRef(false);
+
+      // Initialize
+      useEffect(() => {
+        loadData();
+        const audio = audioRef.current;
+        audio.addEventListener('timeupdate', handleTimeUpdate);
+        audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+        audio.addEventListener('ended', handleTrackEnd);
+
+        return () => {
+          audio.removeEventListener('timeupdate', handleTimeUpdate);
+          audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+          audio.removeEventListener('ended', handleTrackEnd);
+          audio.pause();
+        };
+      }, []);
+
+      const loadData = async () => {
+        try {
+          const dbTracks = await getTracksFromDB();
+          const dbPlaylists = await getPlaylistsFromDB();
+          setTracks(dbTracks);
+          setPlaylists(dbPlaylists);
+          setQueue(dbTracks); // Default queue
+        } catch (err) {
+          console.error("DB Load Error:", err);
+        }
+      };
+
+      const showToast = (msg) => {
+        setToastMessage(msg);
+        setTimeout(() => setToastMessage(null), 3000);
+      };
+
+      // --- AUDIO & QUEUE CONTROLS ---
+      const playTrack = (track, newQueue = null) => {
+        if (currentTrack?.id === track.id && newQueue === null) {
+          togglePlay();
+          return;
+        }
+        
+        if (newQueue) setQueue(newQueue);
+
+        setCurrentTrack(track);
+        audioRef.current.src = URL.createObjectURL(track.blob);
+        
+        if (!audioCtxRef.current) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          const ctx = new AudioContext();
+          const source = ctx.createMediaElementSource(audioRef.current);
+          
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 256;
+          analyserRef.current = analyser;
+
+          const freqs = [60, 310, 1000, 6000, 14000];
+          const filters = freqs.map((f, i) => {
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'peaking';
+            filter.frequency.value = f;
+            filter.gain.value = eqValues[i];
+            return filter;
+          });
+
+          let chain = source;
+          filters.forEach(f => {
+            chain.connect(f);
+            chain = f;
+          });
+          chain.connect(analyser);
+          analyser.connect(ctx.destination);
+
+          audioCtxRef.current = ctx;
+          filtersRef.current = filters;
+        }
+
+        if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+        audioRef.current.play();
+        setIsPlaying(true);
+      };
+
+      const togglePlay = () => {
+        if (!currentTrack) return;
+        if (isPlaying) audioRef.current.pause();
+        else audioRef.current.play();
+        setIsPlaying(!isPlaying);
+      };
+
+      const getNextTrackIndex = (currentIndex, dir = 1) => {
+        let nextIndex = currentIndex + dir;
+        if (nextIndex >= queue.length) nextIndex = 0;
+        if (nextIndex < 0) nextIndex = queue.length - 1;
+        
+        if (isShuffle) {
+          return Math.floor(Math.random() * queue.length);
+        }
+        return nextIndex;
+      };
+
+      const playNext = () => {
+        if (!currentTrack || queue.length === 0) return;
+        const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+        const nextIndex = getNextTrackIndex(currentIndex, 1);
+        playTrack(queue[nextIndex]);
+      };
+
+      const playPrev = () => {
+        if (!currentTrack || queue.length === 0) return;
+        const currentIndex = queue.findIndex(t => t.id === currentTrack.id);
+        const prevIndex = getNextTrackIndex(currentIndex, -1);
+        playTrack(queue[prevIndex]);
+      };
+
+      const handleTimeUpdate = () => setProgress(audioRef.current.currentTime);
+      const handleLoadedMetadata = () => setDuration(audioRef.current.duration);
+      const handleTrackEnd = () => playNext();
+      const handleSeek = (e) => {
+        const time = Number(e.target.value);
+        audioRef.current.currentTime = time;
+        setProgress(time);
+      };
+      const handleVolumeChange = (e) => {
+        const vol = Number(e.target.value);
+        audioRef.current.volume = vol;
+        setVolume(vol);
+      };
+      const handleEqChange = (index, value) => {
+        const newEq = [...eqValues];
+        newEq[index] = Number(value);
+        setEqValues(newEq);
+        if (filtersRef.current[index]) filtersRef.current[index].gain.value = Number(value);
+      };
+
+      // --- VISUALIZER ENGINE ---
+      useEffect(() => {
+        if (!isNowPlaying || !analyserRef.current || !canvasRef.current) return;
+        
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const analyser = analyserRef.current;
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const draw = () => {
+          reqAnimRef.current = requestAnimationFrame(draw);
+          
+          // Responsive canvas sizing
+          const width = canvas.clientWidth;
+          const height = canvas.clientHeight;
+          if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+          }
+
+          analyser.getByteFrequencyData(dataArray);
+          ctx.clearRect(0, 0, width, height);
+
+          const barWidth = (width / bufferLength) * 2.5;
+          let x = 0;
+
+          for (let i = 0; i < bufferLength; i++) {
+            const barHeight = (dataArray[i] / 255) * height;
             
-            <label class="block text-left text-xs font-bold text-[#b5bac1] uppercase mb-2">Profile Picture (Optional)</label>
-            <input type="file" id="pfp-input" accept="image/*" class="w-full text-white text-sm mb-6 bg-[#1e1f22] p-2 rounded">
+            const gradient = ctx.createLinearGradient(0, height, 0, height - barHeight);
+            gradient.addColorStop(0, 'rgba(244, 63, 94, 0.8)'); // rose-500
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0.8)');
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.roundRect(x, height - barHeight, barWidth - 2, barHeight, [4, 4, 0, 0]);
+            ctx.fill();
+
+            x += barWidth;
+          }
+        };
+
+        draw();
+
+        return () => {
+          if (reqAnimRef.current) cancelAnimationFrame(reqAnimRef.current);
+        };
+      }, [isNowPlaying]);
+
+      // --- PLAYLIST LOGIC ---
+      const createNewPlaylist = () => {
+        setModalConfig({
+          title: "New Playlist Name",
+          isInput: true,
+          onConfirm: async (name) => {
+            if (!name) return;
+            const newPlaylist = {
+              id: 'pl_' + Date.now(),
+              title: name,
+              cover: null,
+              trackIds: [],
+              dateAdded: Date.now()
+            };
+            await savePlaylistToDB(newPlaylist);
+            setPlaylists([...playlists, newPlaylist]);
+            setActiveTab('playlist');
+            setActivePlaylistId(newPlaylist.id);
+          }
+        });
+      };
+
+      const addToPlaylist = async (playlistId, trackId) => {
+        const pl = playlists.find(p => p.id === playlistId);
+        if (!pl) return;
+        if (!pl.trackIds.includes(trackId)) {
+          const updated = { ...pl, trackIds: [...pl.trackIds, trackId] };
+          await savePlaylistToDB(updated);
+          setPlaylists(playlists.map(p => p.id === playlistId ? updated : p));
+        }
+        setContextMenu(null);
+      };
+
+      const deletePlaylist = (id) => {
+        setModalConfig({
+          title: "Delete Playlist?",
+          description: "Are you sure you want to delete this playlist from your library?",
+          onConfirm: async () => {
+            await deletePlaylistFromDB(id);
+            setPlaylists(playlists.filter(p => p.id !== id));
+            if(activePlaylistId === id) setActiveTab('library');
+            setContextMenu(null);
+          }
+        });
+      };
+
+      const renamePlaylist = (playlist) => {
+        setModalConfig({
+          title: "Rename Playlist",
+          isInput: true,
+          defaultValue: playlist.title,
+          onConfirm: async (newName) => {
+            if (!newName) return;
+            const updated = { ...playlist, title: newName };
+            await savePlaylistToDB(updated);
+            setPlaylists(playlists.map(p => p.id === playlist.id ? updated : p));
+            setContextMenu(null);
+          }
+        });
+      };
+
+      const downloadPlaylist = async (playlist) => {
+        try {
+          const dirHandle = await window.showDirectoryPicker();
+          let count = 0;
+          for (const tId of playlist.trackIds) {
+            const track = tracks.find(t => t.id === tId);
+            if (track && track.blob) {
+              const fileHandle = await dirHandle.getFileHandle(track.blob.name, { create: true });
+              const writable = await fileHandle.createWritable();
+              await writable.write(track.blob);
+              await writable.close();
+              count++;
+            }
+          }
+          showToast(`Successfully downloaded ${count} tracks!`);
+        } catch (e) {
+          if (e.name !== 'AbortError') console.error("Download failed:", e);
+        }
+        setContextMenu(null);
+      };
+
+      const playEntirePlaylist = (playlist, forceShuffle = false) => {
+        const plTracks = playlist.trackIds.map(id => tracks.find(t => t.id === id)).filter(Boolean);
+        if (plTracks.length === 0) return;
+        
+        let playQueue = [...plTracks];
+        if (forceShuffle) {
+          setIsShuffle(true);
+          playQueue = playQueue.sort(() => Math.random() - 0.5);
+        } else {
+          setIsShuffle(false);
+        }
+        playTrack(playQueue[0], playQueue);
+      };
+
+      // --- ART UPLOAD ---
+      const handleArtUploadChange = (e) => {
+        const file = e.target.files[0];
+        if (!file || !targetForArtRef.current) return;
+        
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          const base64Art = event.target.result;
+          const target = targetForArtRef.current;
+          
+          if (target.type === 'track') {
+            const trackToUpdate = target.data;
+            trackToUpdate.art = base64Art;
+            trackToUpdate.isOfficialArt = isOfficialArtUploadRef.current;
+            await updateTrackInDB(trackToUpdate);
+            setTracks(prev => prev.map(t => t.id === trackToUpdate.id ? trackToUpdate : t));
+          } else if (target.type === 'playlist') {
+            const plToUpdate = target.data;
+            plToUpdate.cover = base64Art;
+            await savePlaylistToDB(plToUpdate);
+            setPlaylists(prev => prev.map(p => p.id === plToUpdate.id ? plToUpdate : p));
+          }
+          setContextMenu(null);
+        };
+        reader.readAsDataURL(file);
+      };
+
+      // --- DRIVE SEARCH & UPLOADS ---
+      useEffect(() => {
+        if (searchQuery.length > 2 && isDriveConnected) {
+          setDriveResults([
+            { id: 'drive-1', title: `${searchQuery} (From Drive)`, artist: 'Cloud User', source: 'drive' },
+            { id: 'drive-2', title: `${searchQuery} Remix (Drive)`, artist: 'Cloud User', source: 'drive' }
+          ]);
+        } else setDriveResults([]);
+      }, [searchQuery, isDriveConnected]);
+
+      const handleFileUpload = (e) => {
+        const files = Array.from(e.target.files).filter(f => f.type.startsWith('audio/'));
+        if (files.length === 0) return;
+        setUploadQueue(prev => [...prev, ...files]);
+      };
+
+      useEffect(() => {
+        const processQueue = async () => {
+          if (uploadQueue.length === 0 || isProcessingQueue) return;
+          setIsProcessingQueue(true);
+          const fileToProcess = uploadQueue[0];
+
+          try {
+            const newTrack = {
+              id: fileToProcess.name + Date.now(), 
+              title: fileToProcess.name.replace(/\.[^/.]+$/, ""), 
+              artist: "Unknown Artist", 
+              album: "Unknown Album",
+              blob: fileToProcess,
+              dateAdded: Date.now(),
+              source: 'local'
+            };
+            await saveTrackToDB(newTrack);
+            setTracks(prev => [...prev, newTrack]);
+            setProcessedCount(prev => prev + 1);
+          } catch (error) {
+            console.error("Error processing file", fileToProcess.name, error);
+          } finally {
+            setUploadQueue(prev => prev.slice(1));
+            setIsProcessingQueue(false);
+          }
+        };
+        processQueue();
+      }, [uploadQueue, isProcessingQueue]);
+
+      const saveSettings = () => {
+        localStorage.setItem('gcpClientId', gcpClientId);
+        localStorage.setItem('gcpApiKey', gcpApiKey);
+        if (gcpClientId && gcpApiKey) {
+          showToast("Settings saved. Google API Client initialized.");
+          setIsDriveConnected(true);
+        }
+      };
+
+      const handleAdminToggle = (checked) => {
+        if (checked) {
+          setModalConfig({
+            title: "Enter Admin Password",
+            isInput: true,
+            isPassword: true,
+            onConfirm: (pwd) => {
+              if (pwd === "19501985") {
+                setIsAdmin(true);
+                localStorage.setItem('isAdmin', 'true');
+                showToast("Julian Mode Enabled.");
+              } else {
+                showToast("Incorrect Password.");
+              }
+            }
+          });
+        } else {
+          setIsAdmin(false);
+          localStorage.setItem('isAdmin', 'false');
+        }
+      };
+
+      // Context Menu Closer
+      useEffect(() => {
+        const handleClick = () => { setContextMenu(null); setContextSubMenu(false); };
+        window.addEventListener('click', handleClick);
+        return () => window.removeEventListener('click', handleClick);
+      }, []);
+
+      const filteredTracks = tracks.filter(t => 
+        t.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+        t.artist.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      const activePlaylist = playlists.find(p => p.id === activePlaylistId);
+
+      // --- RENDER HELPERS ---
+      const SidebarItem = ({ icon: Icon, label, tabId, plId = null }) => (
+        <button 
+          onClick={() => {
+            setActiveTab(tabId);
+            if(plId) setActivePlaylistId(plId);
+          }}
+          onContextMenu={(e) => {
+            if(plId) {
+              e.preventDefault();
+              e.stopPropagation();
+              setContextMenu({ x: e.pageX, y: e.pageY, type: 'playlist', data: playlists.find(p=>p.id===plId) });
+            }
+          }}
+          className={`flex items-center w-full space-x-3 px-3 py-2 text-sm font-medium rounded-md transition-colors truncate ${
+            (activeTab === tabId && (!plId || activePlaylistId === plId))
+              ? 'bg-zinc-800 text-rose-500' 
+              : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+          }`}
+        >
+          <Icon size={18} className={(activeTab === tabId && (!plId || activePlaylistId === plId)) ? 'text-rose-500' : 'text-zinc-400'} />
+          <span className="truncate">{label}</span>
+        </button>
+      );
+
+      return (
+        <div className="flex flex-col h-screen bg-black text-white font-sans overflow-hidden select-none">
+          
+          {/* GLOBAL TOAST & MODALS */}
+          {toastMessage && (
+            <div className="fixed top-8 left-1/2 transform -translate-x-1/2 z-[100] bg-zinc-800 text-white px-6 py-3 rounded-full shadow-2xl flex items-center space-x-2 animate-in fade-in slide-in-from-top-4 border border-zinc-700">
+              <Activity size={16} className="text-rose-500" />
+              <span className="text-sm font-medium">{toastMessage}</span>
+            </div>
+          )}
+
+          {modalConfig && (
+            <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center animate-in fade-in">
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-96 overflow-hidden shadow-2xl">
+                <div className="p-6">
+                  <h3 className="text-xl font-bold mb-2">{modalConfig.title}</h3>
+                  {modalConfig.description && <p className="text-zinc-400 text-sm mb-4">{modalConfig.description}</p>}
+                  
+                  {modalConfig.isInput && (
+                    <input 
+                      type={modalConfig.isPassword ? "password" : "text"}
+                      autoFocus
+                      defaultValue={modalConfig.defaultValue || ""}
+                      placeholder="Enter text..."
+                      className="w-full bg-zinc-950 text-white border border-zinc-800 rounded-md px-4 py-3 focus:outline-none focus:border-rose-500 font-medium mb-4"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          modalConfig.onConfirm(e.target.value);
+                          setModalConfig(null);
+                        }
+                      }}
+                      id="modal-input"
+                    />
+                  )}
+                </div>
+                <div className="flex border-t border-zinc-800">
+                  <button 
+                    className="flex-1 py-3 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors font-medium"
+                    onClick={() => setModalConfig(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    className="flex-1 py-3 text-rose-500 hover:bg-zinc-800 transition-colors font-medium border-l border-zinc-800"
+                    onClick={() => {
+                      const val = modalConfig.isInput ? document.getElementById('modal-input').value : null;
+                      modalConfig.onConfirm(val);
+                      setModalConfig(null);
+                    }}
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* FULL SCREEN NOW PLAYING / VISUALIZER */}
+          {isNowPlaying && currentTrack && (
+            <div className="fixed inset-0 z-40 bg-black animate-in slide-in-from-bottom-full flex flex-col">
+              {/* Ambient Blurred Background */}
+              <div 
+                className="absolute inset-0 bg-cover bg-center opacity-30 blur-[100px] scale-150 transition-all duration-1000"
+                style={{ background: currentTrack.art ? `url(${currentTrack.art}) center/cover` : stringToColor(currentTrack.title) }}
+              />
+              
+              <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-8">
+                <button 
+                  onClick={() => setIsNowPlaying(false)}
+                  className="absolute top-8 left-8 w-10 h-10 bg-zinc-800/50 hover:bg-zinc-700/50 rounded-full flex items-center justify-center backdrop-blur-md transition-colors"
+                >
+                  <ChevronDown size={24} className="text-white" />
+                </button>
+                
+                <div 
+                  className="w-64 h-64 md:w-96 md:h-96 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] mb-12 bg-cover bg-center"
+                  style={{ background: currentTrack.art ? `url(${currentTrack.art}) center/cover` : stringToColor(currentTrack.title) }}
+                />
+                
+                <h1 className="text-4xl font-bold text-white mb-2 text-center max-w-2xl truncate">{currentTrack.title}</h1>
+                <p className="text-xl text-rose-400/80 mb-12 text-center max-w-2xl truncate">{currentTrack.artist}</p>
+                
+                {/* Visualizer Canvas */}
+                <div className="w-full max-w-4xl h-32 relative">
+                  <canvas ref={canvasRef} className="w-full h-full" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-1 overflow-hidden">
             
-            <button id="login-btn" class="w-full bg-[#5865f2] hover:bg-[#4752c4] text-white p-3 rounded font-medium transition">Join Server</button>
-            <div id="login-status" class="text-[#23a55a] text-sm mt-2 hidden">Uploading PFP and connecting...</div>
-        </div>
-    </div>
+            {/* SIDEBAR */}
+            <div className="w-64 bg-[#121212] border-r border-zinc-800 flex flex-col">
+              <div className="p-5 flex items-center space-x-2">
+                <div className="w-8 h-8 bg-rose-500 rounded-full flex items-center justify-center">
+                  <Music size={18} className="text-white" />
+                </div>
+                <span className="text-lg font-semibold tracking-tight">Apple Music</span>
+              </div>
 
-    <div id="channel-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 hidden">
-        <div class="bg-[#313338] p-6 rounded-md shadow-lg w-80 border border-[#2b2d31]">
-            <h2 class="text-white text-xl font-bold mb-4">Create Text Channel</h2>
-            <input type="text" id="new-channel-name" placeholder="new-channel" class="w-full p-2 rounded bg-[#1e1f22] text-white focus:outline-none mb-4 border border-[#1e1f22] focus:border-[#5865f2] lowercase">
-            <div class="flex justify-end gap-2">
-                <button id="cancel-channel-btn" class="text-white hover:underline px-4 py-2 text-sm">Cancel</button>
-                <button id="confirm-channel-btn" class="bg-[#5865f2] hover:bg-[#4752c4] text-white px-4 py-2 rounded text-sm font-medium">Create</button>
-            </div>
-        </div>
-    </div>
+              <div className="flex-1 overflow-y-auto px-3 py-2 space-y-6">
+                <div className="space-y-1">
+                  <input 
+                    type="text" 
+                    placeholder="Search" 
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setActiveTab('search');
+                    }}
+                    className="w-full bg-zinc-800 text-sm text-white px-3 py-2 rounded-md border border-zinc-700 focus:outline-none focus:border-rose-500 mb-4 transition-colors"
+                  />
+                  <SidebarItem icon={Home} label="Listen Now" tabId="home" />
+                  <SidebarItem icon={Radio} label="Browse" tabId="browse" />
+                  <SidebarItem icon={Radio} label="Radio" tabId="radio" />
+                </div>
 
-    <div class="flex h-full w-full">
-
-        <div class="w-[72px] bg-[#1e1f22] flex flex-col items-center py-3 gap-2 shrink-0">
-            <div class="w-12 h-12 bg-[#5865f2] text-white rounded-[16px] flex items-center justify-center cursor-pointer transition-all duration-200">
-                <span class="font-bold text-xl">D</span>
-            </div>
-            <div class="w-8 h-[2px] bg-[#35363c] rounded my-1"></div>
-        </div>
-
-        <div class="w-60 bg-[#2b2d31] flex flex-col shrink-0 justify-between">
-            <div class="flex flex-col h-full min-h-0">
-                <div class="h-12 border-b border-[#1f2023] flex items-center px-4 font-bold text-white shadow-sm shrink-0">
-                    Our Hangout Server
+                <div className="space-y-1">
+                  <h3 className="px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Library</h3>
+                  <SidebarItem icon={Library} label="Recently Added" tabId="library" />
+                  <SidebarItem icon={Music} label="Songs" tabId="library" />
                 </div>
                 
-                <div class="p-2 flex-1 overflow-y-auto">
-                    <div class="flex items-center justify-between px-2 py-1 mb-1 group">
-                        <span class="text-xs font-bold text-[#949ba4] hover:text-[#dbdee1] uppercase tracking-wider cursor-default">Text Channels</span>
-                        <button id="open-create-channel-btn" class="text-[#949ba4] hover:text-[#dbdee1] text-lg font-bold transition">+</button>
-                    </div>
-                    <div id="channels-container" class="flex flex-col gap-[2px]">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between px-3 mb-2">
+                    <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Playlists</h3>
+                    <PlusCircle size={14} className="text-zinc-400 hover:text-white cursor-pointer" onClick={createNewPlaylist} />
+                  </div>
+                  {playlists.map(pl => (
+                    <SidebarItem key={pl.id} icon={ListMusic} label={pl.title} tabId="playlist" plId={pl.id} />
+                  ))}
+                </div>
+
+                <div className="space-y-1">
+                  <h3 className="px-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Cloud & Admin</h3>
+                  <SidebarItem icon={UploadCloud} label="Upload Files" tabId="upload" />
+                  <SidebarItem icon={Settings} label="Settings" tabId="settings" />
+                </div>
+              </div>
+            </div>
+
+            {/* MAIN CONTENT */}
+            <div className="flex-1 bg-[#1a1a1a] flex flex-col overflow-hidden relative">
+              
+              <div className="h-16 flex items-center justify-between px-8 border-b border-zinc-800/50 bg-[#1a1a1a]/80 backdrop-blur-md sticky top-0 z-10">
+                <div className="flex space-x-4 text-zinc-400">
+                  <button className="p-1 hover:text-white transition-colors"><ChevronLeft size={24} /></button>
+                  <button className="p-1 hover:text-white transition-colors"><ChevronRight size={24} /></button>
+                </div>
+                <div className="text-sm font-medium flex items-center space-x-2 bg-zinc-800 px-3 py-1 rounded-full cursor-pointer hover:bg-zinc-700">
+                  <Cloud size={14} className={isDriveConnected ? "text-green-400" : "text-zinc-400"} />
+                  <span>{isDriveConnected ? "Drive Connected" : "Local Mode"}</span>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-8 relative">
+                
+                {(activeTab === 'library' || activeTab === 'search') && (
+                  <div className="animate-in fade-in duration-300">
+                    <h1 className="text-3xl font-bold mb-6 text-white tracking-tight">
+                      {activeTab === 'search' ? (searchQuery ? `Search: ${searchQuery}` : 'Search') : 'Library'}
+                    </h1>
+                    
+                    {tracks.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-20 text-zinc-500 space-y-4">
+                        <Music size={64} className="text-zinc-800" />
+                        <p className="text-lg">Your library is empty.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                        {filteredTracks.map(track => (
+                          <div 
+                            key={track.id} 
+                            className="group cursor-pointer rounded-lg p-3 hover:bg-zinc-800/50 transition-colors relative"
+                            onClick={() => playTrack(track, filteredTracks)}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              let x = e.pageX; let y = e.pageY;
+                              if (y > window.innerHeight - 250) y = window.innerHeight - 250; // bounds check
+                              setContextMenu({ x, y, type: 'track', data: track });
+                              setContextSubMenu(false);
+                            }}
+                          >
+                            <div 
+                              className="w-full aspect-square rounded-md shadow-lg mb-3 relative overflow-hidden flex items-center justify-center transition-transform group-hover:scale-105 bg-cover bg-center"
+                              style={{ background: track.art ? `url(${track.art}) center/cover` : stringToColor(track.title) }}
+                            >
+                              <div className={`absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity ${currentTrack?.id === track.id && isPlaying ? 'opacity-100' : ''}`}>
+                                {currentTrack?.id === track.id && isPlaying ? <Pause size={32} fill="white" /> : <Play size={32} fill="white" />}
+                              </div>
+                              {!track.art && <Music size={48} className="text-white/20" />}
+                            </div>
+                            <h3 className="font-medium text-sm text-white truncate">{track.title}</h3>
+                            <p className="text-xs text-zinc-400 truncate">{track.artist}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* PLAYLIST DETAIL VIEW */}
+                {activeTab === 'playlist' && activePlaylist && (
+                  <div className="animate-in fade-in duration-300 max-w-5xl mx-auto">
+                    <div className="flex flex-col md:flex-row gap-8 mb-8 items-end">
+                      <div 
+                        className="w-56 h-56 rounded-xl shadow-2xl flex-shrink-0 bg-cover bg-center flex items-center justify-center bg-zinc-800 group relative"
+                        style={{ background: activePlaylist.cover ? `url(${activePlaylist.cover}) center/cover` : stringToColor(activePlaylist.title) }}
+                      >
+                        {!activePlaylist.cover && <Music size={64} className="text-white/20" />}
+                        <div 
+                          className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer transition-opacity rounded-xl"
+                          onClick={() => {
+                            targetForArtRef.current = { type: 'playlist', data: activePlaylist };
+                            playlistArtInputRef.current.click();
+                          }}
+                        >
+                          <Edit2 size={32} className="text-white" />
                         </div>
-                </div>
-            </div>
-
-            <div class="h-[52px] bg-[#232428] flex items-center justify-between px-2 shrink-0">
-                <div class="flex items-center gap-2">
-                    <div id="user-avatar-container" class="w-8 h-8 rounded-full bg-[#5865f2] flex items-center justify-center font-bold text-white text-sm relative shrink-0">
-                        <span id="user-avatar-initial">?</span>
-                        <div class="w-3 h-3 bg-[#23a55a] border-2 border-[#232428] rounded-full absolute bottom-0 right-0"></div>
+                      </div>
+                      
+                      <div className="flex-1 space-y-4">
+                        <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">Playlist</p>
+                        <h1 className="text-5xl font-bold text-white tracking-tight">{activePlaylist.title}</h1>
+                        <p className="text-rose-500 font-medium">Waylon / Julian <span className="text-zinc-500 ml-2 font-normal">• {activePlaylist.trackIds.length} Songs</span></p>
+                        
+                        <div className="flex space-x-3 pt-2">
+                          <button 
+                            onClick={() => playEntirePlaylist(activePlaylist, false)}
+                            className="bg-rose-500 hover:bg-rose-600 text-white px-8 py-3 rounded-md font-semibold flex items-center space-x-2 transition-colors"
+                          >
+                            <Play fill="white" size={20} /> <span>Play</span>
+                          </button>
+                          <button 
+                            onClick={() => playEntirePlaylist(activePlaylist, true)}
+                            className="bg-zinc-800 hover:bg-zinc-700 text-rose-500 px-8 py-3 rounded-md font-semibold flex items-center space-x-2 transition-colors"
+                          >
+                            <Shuffle size={20} /> <span>Shuffle</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div class="flex flex-col min-w-0">
-                        <span id="current-username" class="text-white text-sm font-semibold truncate">Guest</span>
-                        <span class="text-[#949ba4] text-xs cursor-pointer hover:underline" id="logout-btn">Log Out</span>
+
+                    <div className="w-full">
+                      <div className="grid grid-cols-[auto_1fr_1fr_auto] gap-4 px-4 py-2 border-b border-zinc-800 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                        <div className="w-8 text-center">#</div>
+                        <div>Title</div>
+                        <div>Artist</div>
+                        <div><MoreHorizontal size={16} /></div>
+                      </div>
+                      
+                      {activePlaylist.trackIds.length === 0 ? (
+                        <div className="py-12 text-center text-zinc-500">No tracks in this playlist.</div>
+                      ) : (
+                        <div className="mt-2 space-y-1">
+                          {activePlaylist.trackIds.map((tid, index) => {
+                            const t = tracks.find(tr => tr.id === tid);
+                            if (!t) return null;
+                            const isCurrent = currentTrack?.id === t.id;
+                            return (
+                              <div 
+                                key={t.id + index} 
+                                onDoubleClick={() => playTrack(t, activePlaylist.trackIds.map(id => tracks.find(tr => tr.id === id)))}
+                                className={`grid grid-cols-[auto_1fr_1fr_auto] gap-4 px-4 py-3 rounded-md items-center group cursor-pointer ${isCurrent ? 'bg-zinc-800/50' : 'hover:bg-zinc-800/50'}`}
+                              >
+                                <div className="w-8 text-center text-zinc-500 text-sm">
+                                  {isCurrent && isPlaying ? <img src="https://open.scdn.co/cdn/images/equaliser-animated-green.f93a2ef4.gif" className="w-4 h-4 mx-auto" alt="playing" style={{filter: 'hue-rotate(300deg)'}}/> : 
+                                   <span className="group-hover:hidden">{index + 1}</span>}
+                                  <Play size={14} className="mx-auto hidden group-hover:block" fill="currentColor" onClick={() => playTrack(t, activePlaylist.trackIds.map(id => tracks.find(tr => tr.id === id)))} />
+                                </div>
+                                <div className="flex items-center space-x-3">
+                                  <div className="w-10 h-10 rounded bg-cover bg-center shadow-sm" style={{ background: t.art ? `url(${t.art}) center/cover` : stringToColor(t.title) }} />
+                                  <div className={`text-sm font-medium truncate ${isCurrent ? 'text-rose-500' : 'text-white'}`}>{t.title}</div>
+                                </div>
+                                <div className="text-sm text-zinc-400 truncate">{t.artist}</div>
+                                <div className="text-zinc-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <MoreHorizontal size={18} />
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
-                </div>
+                  </div>
+                )}
+
+                {/* CONTEXT MENUS */}
+                <input type="file" accept="image/*" ref={artInputRef} className="hidden" onChange={handleArtUploadChange} />
+                <input type="file" accept="image/*" ref={playlistArtInputRef} className="hidden" onChange={handleArtUploadChange} />
+
+                {contextMenu && contextMenu.type === 'track' && (
+                  <div 
+                    className="fixed z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-2xl py-1 w-64 text-sm overflow-hidden"
+                    style={{ top: contextMenu.y, left: contextMenu.x }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-3 py-2 border-b border-zinc-800 text-xs text-zinc-400 font-semibold truncate bg-zinc-950 flex items-center space-x-2">
+                      <div className="w-6 h-6 rounded bg-cover" style={{ background: contextMenu.data.art ? `url(${contextMenu.data.art}) center/cover` : stringToColor(contextMenu.data.title) }} />
+                      <span className="truncate">{contextMenu.data.title}</span>
+                    </div>
+
+                    {contextSubMenu ? (
+                      <>
+                        <button className="w-full text-left px-4 py-2 bg-zinc-800 flex items-center space-x-2 text-zinc-300" onClick={() => setContextSubMenu(false)}>
+                          <ChevronLeft size={16} /> <span>Back</span>
+                        </button>
+                        <div className="max-h-48 overflow-y-auto border-t border-zinc-800">
+                          {playlists.length === 0 ? <div className="px-4 py-3 text-zinc-500 italic text-xs">No playlists</div> : 
+                            playlists.map(pl => (
+                              <button key={pl.id} className="w-full text-left px-4 py-2 hover:bg-zinc-800 text-white truncate" onClick={() => addToPlaylist(pl.id, contextMenu.data.id)}>
+                                {pl.title}
+                              </button>
+                            ))
+                          }
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <button className="w-full text-left px-4 py-3 hover:bg-zinc-800 flex items-center justify-between text-zinc-200 transition-colors" onClick={() => setContextSubMenu(true)}>
+                          <div className="flex items-center space-x-3"><List size={16} className="text-zinc-400" /><span>Add to Playlist</span></div>
+                          <ChevronRight size={16} className="text-zinc-500" />
+                        </button>
+                        <button 
+                          className="w-full text-left px-4 py-3 hover:bg-zinc-800 flex items-center space-x-3 text-zinc-200 transition-colors border-t border-zinc-800"
+                          onClick={() => {
+                            targetForArtRef.current = { type: 'track', data: contextMenu.data };
+                            isOfficialArtUploadRef.current = false;
+                            artInputRef.current.click();
+                          }}
+                        >
+                          <ImagePlus size={16} className="text-zinc-400" /><span>Set Custom Art (Local)</span>
+                        </button>
+                        {isAdmin && (
+                          <button 
+                            className="w-full text-left px-4 py-3 hover:bg-zinc-800 flex items-center space-x-3 text-rose-400 transition-colors"
+                            onClick={() => {
+                              targetForArtRef.current = { type: 'track', data: contextMenu.data };
+                              isOfficialArtUploadRef.current = true;
+                              artInputRef.current.click();
+                            }}
+                          >
+                            <Shield size={16} /><span>Set Official Art (Drive)</span>
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {contextMenu && contextMenu.type === 'playlist' && (
+                  <div 
+                    className="fixed z-50 bg-zinc-900 border border-zinc-700 rounded-md shadow-2xl py-1 w-56 text-sm overflow-hidden"
+                    style={{ top: contextMenu.y, left: contextMenu.x }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-3 py-2 border-b border-zinc-800 text-xs text-zinc-400 font-semibold truncate bg-zinc-950">
+                      {contextMenu.data.title}
+                    </div>
+                    <button className="w-full text-left px-4 py-3 hover:bg-zinc-800 flex items-center space-x-3 text-zinc-200 transition-colors" onClick={() => playEntirePlaylist(contextMenu.data, false)}>
+                      <Play size={16} className="text-zinc-400" /><span>Play Next</span>
+                    </button>
+                    <button className="w-full text-left px-4 py-3 hover:bg-zinc-800 flex items-center space-x-3 text-zinc-200 transition-colors" onClick={() => playEntirePlaylist(contextMenu.data, true)}>
+                      <Shuffle size={16} className="text-zinc-400" /><span>Shuffle Play</span>
+                    </button>
+                    <button className="w-full text-left px-4 py-3 hover:bg-zinc-800 flex items-center space-x-3 text-zinc-200 transition-colors border-t border-zinc-800" onClick={() => renamePlaylist(contextMenu.data)}>
+                      <Edit2 size={16} className="text-zinc-400" /><span>Rename</span>
+                    </button>
+                    <button className="w-full text-left px-4 py-3 hover:bg-zinc-800 flex items-center space-x-3 text-zinc-200 transition-colors" onClick={() => downloadPlaylist(contextMenu.data)}>
+                      <Download size={16} className="text-zinc-400" /><span>Download to Folder</span>
+                    </button>
+                    <button className="w-full text-left px-4 py-3 hover:bg-zinc-800 flex items-center space-x-3 text-red-400 transition-colors border-t border-zinc-800" onClick={() => deletePlaylist(contextMenu.data.id)}>
+                      <Trash2 size={16} /><span>Delete from Library</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* SETTINGS / UPLOAD TABS */}
+                {activeTab === 'upload' && (
+                  <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in duration-300">
+                    <h1 className="text-3xl font-bold tracking-tight">Add to Library</h1>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 flex flex-col items-center justify-center text-center space-y-4">
+                      <FolderDown size={48} className="text-zinc-600 mb-2" />
+                      <h2 className="text-xl font-semibold">Upload Files or Folders</h2>
+                      <div className="flex space-x-4 mt-6">
+                        <button onClick={() => fileInputRef.current.click()} className="bg-rose-500 hover:bg-rose-600 text-white px-6 py-2 rounded-full font-medium transition-colors">Select Files</button>
+                        <button onClick={() => folderInputRef.current.click()} className="bg-zinc-800 hover:bg-zinc-700 text-white px-6 py-2 rounded-full font-medium transition-colors">Select Folder</button>
+                      </div>
+                      <input type="file" multiple accept="audio/*" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+                      <input type="file" webkitdirectory="true" directory="true" multiple ref={folderInputRef} className="hidden" onChange={handleFileUpload} />
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'settings' && (
+                  <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in duration-300">
+                    <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+                    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 space-y-6">
+                      
+                      {/* Admin Settings with Password Lock */}
+                      <div className="pb-6 border-b border-zinc-800">
+                        <h2 className="text-xl font-semibold flex items-center space-x-2 mb-4">
+                          <Shield className="text-rose-500" />
+                          <span>Admin Permissions</span>
+                        </h2>
+                        <label className="flex items-center space-x-3 cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={isAdmin}
+                            onChange={(e) => handleAdminToggle(e.target.checked)}
+                            className="w-5 h-5 accent-rose-500 rounded bg-zinc-800 border-zinc-700"
+                          />
+                          <span className="text-sm font-medium">Enable Julian Mode (Requires Password)</span>
+                        </label>
+                      </div>
+
+                      <div className="pb-6 border-b border-zinc-800">
+                        <h2 className="text-xl font-semibold mb-6">Equalizer (EQ)</h2>
+                        <div className="space-y-6 max-w-md">
+                          {[
+                            { label: '60Hz (Bass)', idx: 0 },
+                            { label: '310Hz', idx: 1 },
+                            { label: '1kHz (Mid)', idx: 2 },
+                            { label: '6kHz', idx: 3 },
+                            { label: '14kHz (Treble)', idx: 4 }
+                          ].map(band => (
+                            <div key={band.idx} className="flex items-center space-x-4">
+                              <span className="w-24 text-sm text-zinc-400 text-right">{band.label}</span>
+                              <input 
+                                type="range" min="-12" max="12" step="1"
+                                value={eqValues[band.idx]}
+                                onChange={(e) => handleEqChange(band.idx, e.target.value)}
+                                className="flex-1 h-1 bg-zinc-700 rounded-full appearance-none accent-rose-500 cursor-pointer"
+                              />
+                              <span className="w-12 text-xs text-zinc-500 text-right">{eqValues[band.idx] > 0 ? '+' : ''}{eqValues[band.idx]} dB</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+
+              </div>
             </div>
+          </div>
+
+          {/* BOTTOM PLAYBACK BAR */}
+          <div className="h-[90px] bg-[#1a1a1a] border-t border-zinc-800/80 px-6 flex items-center justify-between shadow-[0_-10px_30px_rgba(0,0,0,0.5)] z-20">
+            <div className="w-1/3 flex items-center space-x-4">
+              {currentTrack ? (
+                <>
+                  <div 
+                    className="w-14 h-14 rounded shadow-md bg-cover bg-center cursor-pointer hover:opacity-80 transition-opacity relative group" 
+                    style={{ background: currentTrack.art ? `url(${currentTrack.art}) center/cover` : stringToColor(currentTrack.title) }}
+                    onClick={() => setIsNowPlaying(!isNowPlaying)}
+                  >
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded">
+                      <Maximize2 size={16} className="text-white" />
+                    </div>
+                  </div>
+                  <div className="truncate">
+                    <h4 className="text-sm font-semibold text-white truncate">{currentTrack.title}</h4>
+                    <p className="text-xs text-zinc-400 truncate">{currentTrack.artist}</p>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center space-x-4 opacity-50">
+                   <div className="w-14 h-14 bg-zinc-800 rounded" />
+                   <div>
+                     <div className="h-3 w-24 bg-zinc-800 rounded mb-2" />
+                     <div className="h-2 w-16 bg-zinc-800 rounded" />
+                   </div>
+                </div>
+              )}
+            </div>
+
+            <div className="w-1/3 flex flex-col items-center justify-center max-w-lg">
+              <div className="flex items-center space-x-6 mb-2">
+                <button onClick={() => setIsShuffle(!isShuffle)} className={`${isShuffle ? 'text-rose-500' : 'text-zinc-400'} hover:text-white transition-colors`}><Shuffle size={18} /></button>
+                <button onClick={playPrev} className="text-zinc-200 hover:text-white transition-colors"><SkipBack size={24} fill="currentColor" /></button>
+                <button onClick={togglePlay} className="w-8 h-8 flex items-center justify-center bg-white text-black rounded-full hover:scale-105 transition-transform">
+                  {isPlaying ? <Pause size={18} fill="black" /> : <Play size={18} fill="black" className="ml-1" />}
+                </button>
+                <button onClick={playNext} className="text-zinc-200 hover:text-white transition-colors"><SkipForward size={24} fill="currentColor" /></button>
+                <button className="text-zinc-400 hover:text-white transition-colors"><Repeat size={18} /></button>
+              </div>
+              
+              <div className="w-full flex items-center space-x-3 text-[10px] text-zinc-400 font-medium tracking-wider">
+                <span>{formatTime(progress)}</span>
+                <div className="flex-1 h-1.5 group relative cursor-pointer flex items-center">
+                  <input type="range" min="0" max={duration || 100} value={progress} onChange={handleSeek} className="absolute w-full h-full opacity-0 cursor-pointer z-10" />
+                  <div className="w-full h-1 bg-zinc-700 rounded-full overflow-hidden">
+                    <div className="h-full bg-white group-hover:bg-rose-500 rounded-full transition-colors" style={{ width: `${(progress / (duration || 1)) * 100}%` }} />
+                  </div>
+                </div>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+
+            <div className="w-1/3 flex items-center justify-end space-x-4 text-zinc-400">
+              <Activity 
+                size={18} 
+                className={`cursor-pointer transition-colors ${isNowPlaying ? 'text-rose-500' : 'hover:text-white'}`} 
+                onClick={() => setIsNowPlaying(!isNowPlaying)}
+              />
+              <Mic size={18} className="hover:text-white cursor-pointer" />
+              <Library size={18} className="hover:text-white cursor-pointer" />
+              <div className="flex items-center space-x-2 group">
+                <Volume2 size={18} />
+                <div className="w-24 h-1.5 relative flex items-center">
+                  <input type="range" min="0" max="1" step="0.01" value={volume} onChange={handleVolumeChange} className="absolute w-full h-full opacity-0 cursor-pointer z-10" />
+                  <div className="w-full h-1 bg-zinc-700 rounded-full overflow-hidden">
+                    <div className="h-full bg-white group-hover:bg-rose-500 rounded-full transition-colors" style={{ width: `${volume * 100}%` }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
+      );
+    }
 
-        <div class="flex-1 bg-[#313338] flex flex-col min-w-0">
-            <div class="h-12 border-b border-[#1f2023] flex items-center px-4 shadow-sm shrink-0">
-                <span class="text-[#80848e] font-semibold text-xl mr-2">#</span>
-                <span id="channel-header-name" class="text-white font-bold">general</span>
-            </div>
-
-            <div id="messages-container" class="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
-                </div>
-
-            <div class="p-4 pt-0 shrink-0">
-                <div class="bg-[#383a40] rounded-lg px-4 py-2.5 flex items-center gap-4">
-                    <label for="media-upload" class="bg-[#4e5058] hover:bg-[#6d6f78] text-[#dbdee1] w-6 h-6 rounded-full flex items-center justify-center cursor-pointer text-xl font-bold transition shrink-0">
-                        +
-                    </label>
-                    <input type="file" id="media-upload" accept="image/*,video/*" class="hidden">
-                    <input type="text" id="chat-input" placeholder="Message #general" class="bg-transparent text-[#dbdee1] focus:outline-none w-full placeholder-[#80848e]">
-                </div>
-                <div id="upload-status" class="text-xs text-[#23a55a] mt-1 px-2 font-medium hidden">Uploading media...</div>
-            </div>
-        </div>
-    </div>
-
-    <script type="module" src="app.js"></script>
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
 </body>
 </html>
